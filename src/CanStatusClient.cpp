@@ -11,10 +11,12 @@ void CanStatusClient::disableRadios() {
     // Not-initialized/disabled errors are expected in radio-free sketches.
     esp_wifi_stop();
     esp_wifi_deinit();
+    // #if macro needed in order to compile sketches where BLE was not activated in the compiler
 #if CONFIG_BT_ENABLED
     esp_bt_controller_disable();
     esp_bt_controller_deinit();
 #endif
+    Serial.printf("WiFi and BLE is turned off!");
 }
 void CanStatusClient::led(uint8_t r,uint8_t g,uint8_t b) {
     if(options_.ledPin>=0) rgbLedWrite(options_.ledPin,r,g,b);
