@@ -1,3 +1,5 @@
+// Build with sketch.yaml: ESP32 core 3.3.11; Arduino IDE 2.3.10 / CLI 1.5.1.
+// Use the adjacent compile/upload scripts. For your own sketch, see README.md.
 #include <CanStatusClient.h>
 CanStatusClient canStatus;
 void setup() {

@@ -1,84 +1,175 @@
-# Status client for Nanolab Extended Core
+# Nanolab: add status reporting and submit your experiment
 
-This Arduino library publishes the latest text snapshot when the Control server polls it. The server polls its configured clients every **60 seconds**, one at a time. The CAN protocol runs in a FreeRTOS task; no CAN processing call is needed in `loop()`.
+Keep your existing experiment code. Add the CAN client initialization in `setup()` and publish a short status string whenever your measurements change. The Nanolab control server requests the latest string every **60 seconds**; CAN communication runs in the background.
 
-## Install and use
+## 1. Use these exact versions
 
-1. Install Espressif's **esp32 Arduino core 3.3.8** or later.
-2. Install the supplied library ZIP through Sketch → Include Library → Add .ZIP Library.
-3. Select the ESP32-S3 board. Use ESP32S3 Dev Module, 8 MB flash, PSRAM disabled, USB mode Hardware CDC and JTAG, USB CDC On Boot enabled.
-4. Add the following to your existing sketch. Keep the object global so it lives for the entire program.
+- **Arduino IDE 2.3.10**.
+- **esp32 by Espressif Systems 3.3.11**, selected in Boards Manager.
+- **Arduino CLI 1.5.1**, already bundled with Arduino IDE 2.3.10. The supplied scripts locate it in the usual IDE installation folders; no Python, Node.js, or additional libraries are required for the scripts.
+
+Board: **ESP32S3 Dev Module**, 8 MB flash, PSRAM disabled, Hardware CDC and JTAG, USB CDC On Boot enabled, DIO 80 MHz, CPU 240 MHz. The example retains the default partition scheme (about 1.2 MB application space on the 8 MB chip). If your experiment needs different partition or board settings, agree them with Bjarke and record them in the FQBN in `sketch.yaml`.
+
+For Boards Manager, use the official additional URL:
+
+```text
+https://espressif.github.io/arduino-esp32/package_esp32_index.json
+```
+
+Install IDE 2.3.10 from the [official release](https://github.com/arduino/arduino-ide/releases/tag/2.3.10). Use **3.3.11 exactly**, rather than whichever ESP32 release is newest.
+
+## 2. Create your submission folder
+
+Download this repository as a ZIP and extract it, or clone it. From the Nanolab folder, run one of:
+
+**macOS Terminal:**
+
+```sh
+bash ./create-project.command MyExperiment ../
+```
+
+**Windows PowerShell:**
+
+```powershell
+.\create-project.ps1 -Name MyExperiment -Parent ..
+```
+
+Replace `MyExperiment` with your project name (letters, digits and underscores, starting with a letter). This creates a separate, self-contained folder; an existing folder is never overwritten. Open `MyExperiment/MyExperiment.ino` in Arduino IDE 2.3.10 and merge your existing code into it. Copy any other source files your experiment needs into that folder as well. Keep exactly one `setup()` and one `loop()`.
+
+The main `.ino` filename **must match the sketch folder name**. The generator includes the exact CAN library source in `libraries/CanStatusClient` and lists it in `sketch.yaml`. You can compile this project without installing the CAN library globally. If you also use the IDE's Verify button, install the Nanolab repository ZIP through **Sketch → Include Library → Add .ZIP Library**. The supplied CLI scripts are the required final build check and use the project-local source.
+
+To try the existing 80-byte demonstration first, run `compile.command` / `compile.ps1` or `upload.command` / `upload.ps1` in `examples/TestClient`. Keep the full Nanolab repository together: that example's `sketch.yaml` points to the library two directories above it. The **generated project** has no such dependency on the original repository.
+
+## 3. Add only these calls to your existing code
 
 ```cpp
 #include <CanStatusClient.h>
-CanStatusClient canStatus;
+CanStatusClient canStatus; // Global: do not put this inside setup().
 
 void setup() {
-  // Your existing sensor initialization goes here.
+  // Your existing sensor initialization.
   if (!canStatus.begin()) {
-    // Startup failed: GPIO40 turns red. Handle this for your application.
+    // CAN startup failed; GPIO40 turns red. Handle this for your experiment.
     return;
   }
   canStatus.setData("Starting");
 }
 
 void loop() {
-  // After collecting a complete, consistent set of measurements:
+  // Your existing measurement code; use actual values in the string.
   char record[81];
   snprintf(record, sizeof(record), "temperature=%.2f status=OK", 23.5);
-  if (!canStatus.setData(record)) {
-    // Rejected: longer than 80 bytes or contains control characters.
-  }
-  delay(1000); // Your existing application can do other work here.
+  canStatus.setData(record);
+  delay(1000); // Or keep your existing scheduling.
 }
 ```
 
-Replace the example temperature with your actual measurements or data you want to sent. `setData()` copies the string immediately under a short lock, so a stack buffer is safe. It does not transmit immediately. The background task takes a coherent snapshot when polled. Updating once per second with a 60-second poll produces one logged latest snapshot per minute; intermediate measurements are not queued. This is suitable for status reporting, not lossless recording of every sensor measurement or brief alarm event.
+`setData()` copies the string immediately and returns `false` if it exceeds **80 bytes** or contains newlines, tabs or other ASCII control characters. The previous valid value is retained on failure. Use the latest complete measurement; there is no CAN processing call to add to `loop()`. Intermediate measurements are not queued. `begin()` shuts down Wi-Fi/BLE; remove any code that subsequently starts either radio. Leave the library's Bluetooth compile guard in place.
 
-The maximum is **80 bytes**, equivalent to 80 ASCII characters. UTF-8 characters may consume multiple bytes. CR, LF, tabs and other ASCII control characters are rejected to preserve one log record per line. Empty strings are allowed. Rejected updates leave the previous snapshot intact. Call from normal task context, not an ISR/Interupt. A client that has never received `setData()` replies with `NO_DATA`; snapshot age then equals `4294967295`.
+Pins are CAN TX **7**, CAN RX **6**, and status NeoPixel **40**. The library owns the CAN/TWAI controller. Do not initialize a second CAN driver. Amber means waiting, cyan means responding, green means the server acknowledged storage, and red means a startup/CAN fault. Each client's ID comes from the final two bytes of its factory MAC; tell Bjarke that ID and check IDs are unique across the experiments.
 
-## Options and API
+## 4. List every library in `sketch.yaml`
 
-```cpp
-CanStatusClient::Options options;
-options.txPin = 7;
-options.rxPin = 6;
-options.ledPin = 40;       // -1 disables library LED control
-options.bitrate = 250000; // server default; alternatives 125000 or 500000
-options.expectedId = 0x8dd4; // optional identity check; not an ID override
-options.idleTimeoutMs = 180000;
-bool started = canStatus.begin(options);
+The generated file pins the board and ESP32 core and initially lists only the bundled CAN library:
+
+```yaml
+profiles:
+  nanolab:
+    notes: "Arduino IDE 2.3.10; Arduino CLI 1.5.1; ESP32 core 3.3.11"
+    fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=8M,PSRAM=disabled,FlashMode=dio,CPUFreq=240,PartitionScheme=default
+    platforms:
+      - platform: esp32:esp32 (3.3.11)
+        platform_index_url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+    libraries:
+      - dir: libraries/CanStatusClient
+default_profile: nanolab
 ```
 
-`begin()` returns true after driver/task creation, not proof of a functioning physical bus. Call it once. This library owns the ESP32-S3's classic TWAI controller; remove other CAN driver initialization. Do not destroy the object while running. `nodeId()` returns its derived ID; `running()` reports task creation; `acknowledged()` counts received storage acknowledgments since boot. There is no dynamic stop/reconfigure API.
+Under `libraries:`, add **every external library your sketch uses, including dependencies of those libraries**:
 
-`begin()` executes:
+- Library Manager libraries: use their exact Library Manager name and tested version, for example `- Adafruit BusIO (1.17.0)`. This is a syntax example; include it only if your project actually uses that version.
+- Custom, modified or non-indexed libraries: copy the complete library, with `library.properties`, source and license, into `libraries/LibraryName`; add `- dir: libraries/LibraryName`. List its dependencies too. Include the source URL and version/commit in an `ORIGIN.txt` file. Do not use an absolute path, a folder outside the submission, or an unpinned Git branch.
+- ESP32 core headers and built-in libraries such as `Arduino.h`, `Wire`, `SPI`, `esp_wifi.h` and `esp_bt.h` are already pinned by **esp32 3.3.11**. Do not invent Library Manager entries for them.
 
-```cpp
-esp_wifi_stop();
-esp_wifi_deinit();
-esp_bt_controller_disable();
-esp_bt_controller_deinit();
+Use spaces, not tabs, in YAML. Never omit a version from an indexed library or the ESP32 platform. Include all private/custom library files in the ZIP or Git repository; a dependency on a folder elsewhere on your laptop cannot be compiled by the recipient.
+
+`sketch.yaml` is an **Arduino CLI build profile**. It does not install or select an Arduino IDE version. It also does not make IDE Verify automatically synchronize your dependencies: use the supplied scripts as the handoff test. Profile builds exclude globally installed libraries and automatically fetch the declared indexed versions into an isolated cache. The first build needs internet access and may download several gigabytes of ESP32 tools. [Arduino's build-profile specification](https://docs.arduino.cc/arduino-cli/sketch-project-file/)
+
+## 5. Compile and flash using the scripts
+
+Run these **inside your generated project folder**. They also work when launched from another directory because they locate their own sketch folder.
+
+| Task | macOS | Windows PowerShell |
+|---|---|---|
+| Compile only | `bash ./compile.command` | `.\compile.ps1` |
+| Compile, then flash | `bash ./upload.command` | `.\upload.ps1` |
+| Choose the client port | `bash ./upload.command /dev/cu.usbmodemXXXX` | `.\upload.ps1 -Port COM7` |
+| List detected ports | `bash ./nanolab.command ports` | `.\nanolab.ps1 -Action ports` |
+
+You may also double-click an executable `.command` file in Finder. For ZIPs where executable bits were lost, the `bash` commands above still work. If Windows blocks downloaded PowerShell scripts, review them and use **Unblock-File** on those specific trusted files, or ask your administrator about an organizational execution policy; do not disable the computer's security policy globally.
+
+Instead of passing the port, set `PORTNO` in the same terminal:
+
+```sh
+export PORTNO=/dev/cu.usbmodemXXXX  # macOS
+bash ./upload.command
 ```
 
-The Bluetooth calls are compiled only when the core enables the Bluetooth controller; otherwise it is already unavailable. Not-initialized/disabled return codes are expected and ignored. The library never starts Wi-Fi or BLE. Remove Wi-Fi/BLE startup from the rest of your sketch: another component can explicitly restart radios after these shutdown calls. This is a startup shutdown, not enforcement against later application code. `CanStatusClient::disableRadios()` can also be called explicitly.
+```powershell
+$env:PORTNO = 'COM7'               # Windows
+.\upload.ps1
+```
 
-## LED indications
+Without a port, the scripts accept exactly one detected USB serial port. If there are zero or several, they list the ports and stop. Disconnect unrelated USB serial devices, or specify the client explicitly. A USB serial adapter's identity does not prove which board is attached. **Do not select the Nanolab server's programming port.** Upload always recompiles and stops if compilation fails. It uses **1000000 baud**, not 921600. Close Serial Monitor before upload.
 
-Client: blue during initialization; amber while awaiting a poll; cyan while responding; green after the server acknowledges storage; red on startup failure or CAN bus-off. After three minutes without a poll it returns to amber. Colors use low brightness. Green means an acknowledgment was received, not that the connection is continuously checked between polls.
+For a nonstandard IDE installation, set `ARDUINO_CLI` to the full path of its bundled `arduino-cli` executable. The scripts check for CLI **1.5.1** and stop on a different version. This avoids accidentally using an older CLI from your PATH. Alternatively, install the official standalone CLI 1.5.1. Direct equivalents are:
 
-Server: blue at startup; cyan after a valid RTC read; amber while waiting for clients; green when a client has responded; red for CAN, RTC, SD or deferred-storage faults. `status.txt` gives per-client results, so a green LED does not mean every configured client is online.
+```sh
+arduino-cli compile --profile nanolab --clean --build-path build .
+arduino-cli upload --profile nanolab --port YOUR_PORT --input-dir build --upload-property upload.speed=1000000 .
+```
 
-## Files and time
+## 6. When your experiment works, send the complete project to Bjarke
 
-`data8dd4.txt` receives tab-separated, newline-terminated records such as:
+1. Test the actual sensors, CAN status and behavior on your ESP32-S3. Record the client MAC/ID, wiring, any calibration/setup steps and what you tested in the generated `README.md`.
+2. Confirm IDE **2.3.10**, core **3.3.11**, the exact board options, and every external library/version/path in `sketch.yaml`.
+3. Run the supplied **compile** script on the complete submission. A successful IDE Verify alone is insufficient. Copy the project to a different folder and compile that copy too: it must not refer back to your development folders. Do not rename just the sketch folder without also renaming its main `.ino`.
+4. Submit the following complete structure, using either ZIP or Git:
 
 ```text
-2026-09-11T12:34:56Z	server_uptime_s=60.125	client_uptime_s=72.403	sample_age_ms=403	token=12345678	status=OK	data=temperature=23.50 status=OK
+MyExperiment/
+├── MyExperiment.ino          # Same base name as the folder
+├── sketch.yaml
+├── README.md                 # Your experiment, wiring and test results
+├── compile.command
+├── upload.command
+├── nanolab.command
+├── compile.ps1
+├── upload.ps1
+├── nanolab.ps1
+├── .gitignore
+├── libraries/
+│   ├── CanStatusClient/      # Included complete local library
+│   │   ├── library.properties
+│   │   ├── LICENSE
+│   │   ├── ORIGIN.txt
+│   │   └── src/...
+│   └── OtherLocalLibrary/... # If used; also listed in sketch.yaml
+└── ...your other source/data files
 ```
 
-The server appends only CRC-validated complete replies. It closes the file before sending the application acknowledgment. While SFTP holds a log open, FatFS locking may prevent append: the server retains one sample per client in RAM and retries storage, skipping further polls of that client until it succeeds. Other clients continue. `status.txt` exposes pending storage and timeouts. Do not upload over active `data*.txt` logs. Power loss can lose a pending sample or damage a FAT write; this is not a transactional database. A failed partial SD write can leave an incomplete record or a duplicate retry, identified by the same token. Download/close files promptly instead of keeping handles open indefinitely.
+**ZIP:** remove the generated `build/` folder from the copy you are sending, then compress the entire `MyExperiment` folder. The ZIP must contain that one top-level folder, not just loose `.ino` files. Keep custom libraries, configuration, data assets and all source files. Extract the ZIP elsewhere and run its compile script before sending it.
 
-The example `TestClient` intentionally pads its status to 80 bytes with dots to exercise the maximum message size. For real projects, use the small integration example above without padding.
+**Git:** commit the contents of `MyExperiment/` as the repository root, including the local libraries and scripts. Exclude `build/`; the generated `.gitignore` handles this. Any Git host is fine: GitHub, GitLab, Codeberg, or another accessible server. Avoid required submodules so an ordinary clone contains all source. Send the repository URL and exact tested commit or tag, and ensure Bjarke can read it. To preserve Arduino's folder/filename rule even if the repository has another name:
 
-See `PROTOCOL.md` for exact CAN framing, retries and design tradeoffs. Portable protocol tests are in `tests/protocol_test.c`.
+```sh
+git clone REPOSITORY_URL MyExperiment
+cd MyExperiment
+git checkout TESTED_COMMIT_OR_TAG
+bash ./compile.command              # macOS
+# .\compile.ps1                     # Windows PowerShell
+```
+
+The recipient can then run the upload script with their own port. No changes to source or dependency paths should be necessary after cloning or extracting.
+
+For optional advanced API details see [Client reference](docs/CLIENT_API.md). The CAN wire protocol is documented separately in [PROTOCOL.md](PROTOCOL.md). [Validation performed for this release](docs/VALIDATION.md).

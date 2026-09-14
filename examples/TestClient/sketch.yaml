@@ -1,0 +1,13 @@
+# Required editor: Arduino IDE 2.3.10 (bundles Arduino CLI 1.5.1).
+# Arduino IDE is installed separately; sketch.yaml pins the compilation inputs.
+profiles:
+  nanolab:
+    notes: "Nanolab: Arduino IDE 2.3.10; Arduino CLI 1.5.1; ESP32 core 3.3.11"
+    fqbn: esp32:esp32:esp32s3:USBMode=hwcdc,CDCOnBoot=cdc,FlashSize=8M,PSRAM=disabled,FlashMode=dio,CPUFreq=240,PartitionScheme=default
+    platforms:
+      - platform: esp32:esp32 (3.3.11)
+        platform_index_url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+    libraries:
+      # This example uses the library at the root of the Nanolab repository.
+      - dir: ../..
+default_profile: nanolab
