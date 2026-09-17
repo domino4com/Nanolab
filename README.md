@@ -1,3 +1,10 @@
+# :no_entry: This repository is no longer valid! :no_entry:
+## See [Nanolab Limited](https://github.com/domino4com/Nanolab-Limited)
+
+---
+***
+___
+
 # Nanolab: add status reporting and submit your experiment
 
 Keep your existing experiment code. Add the CAN client initialization in `setup()` and publish a short status string whenever your measurements change. The Nanolab control server requests the latest string every **60 seconds**; CAN communication runs in the background.
